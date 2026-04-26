@@ -295,7 +295,7 @@ window.setMode = function(m){
   s.mode = m;
   el('mode-voice').classList.toggle('on', m==='voice');
   el('mode-auto').classList.toggle('on', m==='auto');
-  speedRow.style.display = m==='auto' ? '' : 'none';
+  speedRow.style.display = '';
 };
 
 // ── Escape HTML ───────────────────────────────────────────────────────────────
@@ -383,15 +383,14 @@ function loop(){
       }
     }
   } else {
-    // Voice mode: scroll while speaking, ease to stop when silent
-    var diff = s.targetY - s.scrollY;
-    if(s.isSpeaking && diff > 0.5){
-      // While speaking: move at least 1px/frame toward target (never stall)
-      s.scrollY += Math.max(1.0, diff * 0.22);
-    } else if(Math.abs(diff) > 0.5){
-      s.scrollY += diff * 0.1;
+    // Voice mode: scroll at set speed when speaking, stop when silent
+    if(s.isSpeaking){
+      s.scrollY += SPEED_PX[s.speed-1];
+      if(s.scrollY >= s.maxScroll){
+        s.scrollY = s.maxScroll;
+        s.isSpeaking = false;
+      }
     }
-    if(s.scrollY > s.maxScroll) s.scrollY = s.maxScroll;
   }
 
   track.style.transform = 'translateY(-' + s.scrollY.toFixed(1) + 'px)';
@@ -457,28 +456,23 @@ function startVoice(){
     vstatus.textContent = '正在聆听…';
   };
 
-  s.recog.onresult = function(e){
-    var last = e.results[e.results.length - 1];
-    var transcript = last[0].transcript;
-    var isFinal = last.isFinal;
-    // Mark as speaking on every result (interim or final)
+  s.recog.onresult = function(){
+    // Any result = still speaking, reset the silence timer
     s.isSpeaking = true;
     clearTimeout(s.speakTimer);
-    s.speakTimer = setTimeout(function(){ s.isSpeaking = false; }, 1000);
-    matchAndAdvance(transcript, isFinal);
+    s.speakTimer = setTimeout(function(){ s.isSpeaking = false; }, 800);
   };
 
   s.recog.onspeechstart = function(){
-    vstatus.textContent = '检测到语音';
+    vstatus.textContent = '正在说话';
     s.isSpeaking = true;
     clearTimeout(s.speakTimer);
   };
 
   s.recog.onspeechend = function(){
     vstatus.textContent = '等待语音…';
-    // Delay stopping so scroll doesn't cut off mid-sentence
     clearTimeout(s.speakTimer);
-    s.speakTimer = setTimeout(function(){ s.isSpeaking = false; }, 1200);
+    s.speakTimer = setTimeout(function(){ s.isSpeaking = false; }, 600);
   };
 
   s.recog.onend = function(){
