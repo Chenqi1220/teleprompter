@@ -227,6 +227,8 @@ var s = {
   playing: false,
   scrollY: 0,
   targetY: 0,         // voice mode: smooth-scroll target
+  isSpeaking: false,  // voice mode: currently detecting speech
+  speakTimer: null,
   speed: 4,
   fontSize: 34,
   mirror: false,
@@ -381,9 +383,14 @@ function loop(){
       }
     }
   } else {
-    // Voice mode: ease toward targetY
+    // Voice mode: scroll while speaking, ease to stop when silent
     var diff = s.targetY - s.scrollY;
-    if(Math.abs(diff) > 0.5) s.scrollY += diff * 0.22;
+    if(s.isSpeaking && diff > 0.5){
+      // While speaking: move at least 1px/frame toward target (never stall)
+      s.scrollY += Math.max(1.0, diff * 0.22);
+    } else if(Math.abs(diff) > 0.5){
+      s.scrollY += diff * 0.1;
+    }
     if(s.scrollY > s.maxScroll) s.scrollY = s.maxScroll;
   }
 
@@ -454,15 +461,24 @@ function startVoice(){
     var last = e.results[e.results.length - 1];
     var transcript = last[0].transcript;
     var isFinal = last.isFinal;
+    // Mark as speaking on every result (interim or final)
+    s.isSpeaking = true;
+    clearTimeout(s.speakTimer);
+    s.speakTimer = setTimeout(function(){ s.isSpeaking = false; }, 1000);
     matchAndAdvance(transcript, isFinal);
   };
 
   s.recog.onspeechstart = function(){
     vstatus.textContent = '检测到语音';
+    s.isSpeaking = true;
+    clearTimeout(s.speakTimer);
   };
 
   s.recog.onspeechend = function(){
     vstatus.textContent = '等待语音…';
+    // Delay stopping so scroll doesn't cut off mid-sentence
+    clearTimeout(s.speakTimer);
+    s.speakTimer = setTimeout(function(){ s.isSpeaking = false; }, 1200);
   };
 
   s.recog.onend = function(){
@@ -533,9 +549,8 @@ function matchAndAdvance(transcript, isFinal){
   }
   s.hlPos = origEnd;
 
-  // Set scroll target: look ahead ~12 chars to compensate for recognition lag
-  // so the screen shows what you're ABOUT to say, not what you just said
-  var lookAhead = isFinal ? 12 : 6;
+  // Set scroll target slightly ahead of matched position
+  var lookAhead = isFinal ? 3 : 1;
   var aheadClean = Math.min(s.cleanPos + lookAhead, s.c2o.length - 1);
   var aheadOrig  = s.c2o[aheadClean] || origEnd;
   var nextCharTop = s.charTops[aheadOrig] || 0;
