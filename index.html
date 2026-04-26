@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<title>提词器</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{
+  width:100%;height:100%;
+  background:#000;color:#fff;
+  font-family:-apple-system,'PingFang SC',sans-serif;
+  overflow:hidden;
+  -webkit-tap-highlight-color:transparent;
+  user-select:none;-webkit-user-select:none;
+}
+
+/* ── SETUP ──────────────────────────────────── */
+#setup{
+  display:flex;flex-direction:column;
+  height:100vh;
+  padding:20px 20px calc(20px + env(safe-area-inset-bottom,0px));
+  gap:14px;
+  overflow-y:auto;-webkit-overflow-scrolling:touch;
+}
+.title{font-size:22px;font-weight:700;text-align:center;padding-top:6px}
+#script-input{
+  flex:1;min-height:150px;
+  background:#1c1c1e;color:#fff;
+  border:1px solid #2c2c2e;border-radius:12px;
+  padding:12px;font-size:15px;line-height:1.6;
+  font-family:inherit;resize:none;outline:none;
+  -webkit-appearance:none;
+}
+#script-input::placeholder{color:#48484a}
+.row{display:flex;flex-direction:column;gap:6px}
+.row-lbl{display:flex;justify-content:space-between;font-size:13px;color:#8e8e93}
+.row-lbl b{color:#fff;font-weight:600}
+input[type=range]{
+  -webkit-appearance:none;appearance:none;
+  width:100%;height:4px;background:#2c2c2e;border-radius:2px;outline:none;
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:22px;height:22px;
+  background:#fff;border-radius:50%;
+}
+.seg{display:flex;background:#1c1c1e;border-radius:10px;overflow:hidden}
+.seg-btn{
+  flex:1;padding:10px 4px;font-size:13px;
+  background:none;border:none;color:#8e8e93;cursor:pointer;
+}
+.seg-btn.on{background:#3a3a3c;color:#fff;font-weight:600}
+.tog-row{display:flex;justify-content:space-between;align-items:center}
+.tog-row span{font-size:16px}
+.tog{
+  width:50px;height:28px;background:#3a3a3c;
+  border-radius:14px;position:relative;cursor:pointer;
+  transition:background .2s;flex-shrink:0;
+}
+.tog.on{background:#30d158}
+.tog::after{
+  content:'';position:absolute;top:3px;left:3px;
+  width:22px;height:22px;background:#fff;border-radius:50%;
+  transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.4);
+}
+.tog.on::after{transform:translateX(22px)}
+.btn-go{
+  -webkit-appearance:none;background:#fff;color:#000;
+  border:none;border-radius:14px;padding:16px;
+  font-size:17px;font-weight:700;cursor:pointer;
+  width:100%;letter-spacing:1px;
+}
+.hint{font-size:11px;color:#48484a;text-align:center}
+#speed-row{transition:opacity .2s}
+
+/* ── PROMPTER ───────────────────────────────── */
+#prompter{
+  display:none;position:fixed;inset:0;
+  background:#000;overflow:hidden;touch-action:none;
+}
+#prompter.mirrored{transform:scaleX(-1)}
+
+#track{
+  position:absolute;top:0;left:0;width:100%;
+  will-change:transform;
+}
+#ptext{
+  padding:40px 16px 85vh;
+  line-height:1.85;word-break:break-all;white-space:pre-wrap;
+}
+/* unread = bright, read = dim */
+#ptext span{color:#fff;transition:color .3s}
+#ptext span.rd{color:rgba(255,255,255,.2)}
+
+/* top guide line marks reading position */
+#guide{
+  position:fixed;top:38px;left:0;right:0;
+  height:1px;background:rgba(255,255,255,.15);
+  pointer-events:none;z-index:5;
+}
+
+/* progress bar */
+#prog{
+  position:fixed;top:0;left:0;right:0;
+  height:2px;background:rgba(255,255,255,.08);z-index:20;
+}
+#prog-fill{height:100%;background:rgba(255,255,255,.45);width:0}
+
+/* mic indicator */
+#mic-dot{
+  position:fixed;top:10px;right:10px;
+  width:32px;height:32px;border-radius:50%;
+  background:rgba(255,255,255,.1);border:none;
+  color:#fff;font-size:15px;
+  display:flex;align-items:center;justify-content:center;
+  z-index:30;cursor:pointer;
+}
+#mic-dot.on{background:rgba(255,59,48,.75)}
+@keyframes pulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(255,59,48,.45)}
+  60%{box-shadow:0 0 0 8px rgba(255,59,48,0)}
+}
+#mic-dot.on{animation:pulse 1.4s infinite}
+
+/* voice mode status label */
+#voice-status{
+  position:fixed;top:11px;left:12px;
+  font-size:11px;color:rgba(255,255,255,.35);
+  z-index:30;pointer-events:none;
+}
+
+/* controls bar */
+#ctls{
+  position:fixed;bottom:0;left:0;right:0;
+  display:flex;align-items:center;justify-content:space-around;
+  padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));
+  background:rgba(0,0,0,.85);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  z-index:40;transition:transform .3s ease;
+}
+#ctls.hide{transform:translateY(100%)}
+.cb{
+  -webkit-appearance:none;background:rgba(255,255,255,.12);
+  border:none;border-radius:50%;color:#fff;
+  width:44px;height:44px;font-size:20px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+}
+#btn-pp{
+  background:#fff;color:#000;
+  width:56px;height:56px;font-size:22px;border-radius:50%;
+}
+
+/* toast */
+#toast{
+  position:fixed;top:50%;left:50%;
+  transform:translate(-50%,-50%) scale(.9);
+  background:rgba(28,28,30,.95);color:#fff;
+  padding:10px 18px;border-radius:10px;
+  font-size:15px;z-index:50;opacity:0;
+  transition:opacity .2s,transform .2s;
+  pointer-events:none;white-space:nowrap;
+}
+#toast.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+</style>
+</head>
+<body>
+
+<!-- ── SETUP ─────────────────────────────────── -->
+<div id="setup">
+  <div class="title">提词器</div>
+
+  <textarea id="script-input" placeholder="粘贴台词内容…" rows="5"></textarea>
+
+  <div class="row">
+    <div class="row-lbl"><span>字体大小</span><b id="lbl-font">34px</b></div>
+    <input type="range" id="sl-font" min="24" max="64" value="34" step="2">
+  </div>
+
+  <div class="row">
+    <div class="row-lbl"><span>滚动模式</span></div>
+    <div class="seg">
+      <button class="seg-btn on" id="mode-voice" onclick="setMode('voice')">🎤 语音跟踪</button>
+      <button class="seg-btn"    id="mode-auto"  onclick="setMode('auto')">⏩ 自动匀速</button>
+    </div>
+  </div>
+
+  <div class="row" id="speed-row" style="display:none">
+    <div class="row-lbl"><span>滚动速度</span><b id="lbl-speed">中</b></div>
+    <input type="range" id="sl-speed" min="1" max="9" value="4" step="1">
+  </div>
+
+  <div class="tog-row">
+    <span>镜像翻转</span>
+    <div class="tog" id="tog-mirror"></div>
+  </div>
+
+  <button class="btn-go" id="btn-start">开始提词</button>
+  <p class="hint">语音跟踪需要 HTTPS 环境 · 双击屏幕暂停/继续</p>
+</div>
+
+<!-- ── PROMPTER ──────────────────────────────── -->
+<div id="prompter">
+  <div id="guide"></div>
+  <div id="prog"><div id="prog-fill"></div></div>
+  <button id="mic-dot">🎤</button>
+  <div id="voice-status"></div>
+  <div id="track"><div id="ptext"></div></div>
+  <div id="ctls">
+    <button class="cb" id="btn-back">✕</button>
+    <button class="cb" id="btn-restart">↺</button>
+    <button class="cb" id="btn-pp">▶</button>
+    <button class="cb" id="btn-slower" style="display:none">🐢</button>
+    <button class="cb" id="btn-faster" style="display:none">🐇</button>
+  </div>
+  <div id="toast"></div>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+// ── State ────────────────────────────────────────────────────────────────────
+var s = {
+  mode: 'voice',      // 'voice' | 'auto'
+  playing: false,
+  scrollY: 0,
+  targetY: 0,         // voice mode: smooth-scroll target
+  speed: 4,
+  fontSize: 34,
+  mirror: false,
+  raf: null,
+
+  // Script data
+  orig: '',           // original text (with punctuation)
+  clean: '',          // only CJK / alphanumeric (for matching)
+  c2o: [],            // clean-index → original-index
+  spanRefs: [],       // original-index → <span> element
+  charTops: [],       // original-index → offsetTop (px)
+  maxScroll: 0,
+
+  // Voice tracking
+  recog: null,
+  cleanPos: 0,        // furthest matched position in clean script
+  hlPos: 0,           // last highlighted original index
+
+  // UI
+  ctlsTimer: null,
+  lastTapMs: 0
+};
+
+var SPEED_LBL = ['极慢','很慢','慢','中慢','中','中快','快','很快','极快'];
+var SPEED_PX  = [0.25, 0.4, 0.65, 1.0, 1.5, 2.2, 3.0, 4.2, 6.0];
+
+// ── DOM refs ─────────────────────────────────────────────────────────────────
+function el(id){ return document.getElementById(id); }
+var setupEl   = el('setup'),    prompterEl = el('prompter');
+var scriptIn  = el('script-input');
+var slFont    = el('sl-font'),  slSpeed    = el('sl-speed');
+var togMirror = el('tog-mirror');
+var lblFont   = el('lbl-font'), lblSpeed   = el('lbl-speed');
+var track     = el('track'),    ptext      = el('ptext');
+var progFill  = el('prog-fill');
+var ctls      = el('ctls');
+var micDot    = el('mic-dot'),  vstatus    = el('voice-status');
+var btnPP     = el('btn-pp'),   btnBack    = el('btn-back');
+var btnRestart= el('btn-restart');
+var btnSlower = el('btn-slower'),btnFaster = el('btn-faster');
+var toastEl   = el('toast');
+var speedRow  = el('speed-row');
+
+// ── Setup screen ─────────────────────────────────────────────────────────────
+slFont.addEventListener('input', function(){
+  s.fontSize = +this.value;
+  var cols = Math.round(343 / s.fontSize);
+  lblFont.textContent = s.fontSize + 'px (~' + cols + '字/行)';
+});
+slFont.dispatchEvent(new Event('input'));
+
+slSpeed.addEventListener('input', function(){
+  s.speed = +this.value;
+  lblSpeed.textContent = SPEED_LBL[s.speed-1];
+});
+slSpeed.dispatchEvent(new Event('input'));
+
+togMirror.addEventListener('click', function(){
+  s.mirror = !s.mirror;
+  togMirror.classList.toggle('on', s.mirror);
+});
+
+window.setMode = function(m){
+  s.mode = m;
+  el('mode-voice').classList.toggle('on', m==='voice');
+  el('mode-auto').classList.toggle('on', m==='auto');
+  speedRow.style.display = m==='auto' ? '' : 'none';
+};
+
+// ── Escape HTML ───────────────────────────────────────────────────────────────
+function esc(c){
+  if(c==='<') return '&lt;';
+  if(c==='>') return '&gt;';
+  if(c==='&') return '&amp;';
+  return c;
+}
+
+// ── START ─────────────────────────────────────────────────────────────────────
+el('btn-start').addEventListener('click', function(){
+  var text = scriptIn.value.trim();
+  if(!text){ showToast('请先输入台词'); return; }
+
+  s.orig = text;
+  s.scrollY = s.targetY = s.cleanPos = s.hlPos = 0;
+  s.playing = false;
+
+  // Build clean string + mapping
+  s.clean = '';
+  s.c2o = [];
+  for(var i=0; i<text.length; i++){
+    if(/[一-鿿＀-￯\w]/.test(text[i])){
+      s.clean += text[i];
+      s.c2o.push(i);
+    }
+  }
+
+  // Render per-character spans for position tracking
+  var html = [];
+  for(var j=0; j<text.length; j++){
+    if(text[j]==='\n') html.push('<br>');
+    else html.push('<span data-o="'+j+'">'+esc(text[j])+'</span>');
+  }
+  ptext.innerHTML = html.join('');
+  ptext.style.fontSize = s.fontSize + 'px';
+
+  prompterEl.classList.toggle('mirrored', s.mirror);
+  setupEl.style.display   = 'none';
+  prompterEl.style.display = 'block';
+  track.style.transform    = 'translateY(0)';
+
+  // Mode-specific UI
+  micDot.style.display   = s.mode==='voice' ? '' : 'none';
+  vstatus.style.display  = s.mode==='voice' ? '' : 'none';
+  btnSlower.style.display = s.mode==='auto' ? '' : 'none';
+  btnFaster.style.display = s.mode==='auto' ? '' : 'none';
+  updatePPBtn();
+
+  // Cache span positions after first paint
+  setTimeout(function(){
+    s.spanRefs = new Array(text.length);
+    s.charTops = new Array(text.length).fill(0);
+    var spans = ptext.querySelectorAll('[data-o]');
+    for(var k=0; k<spans.length; k++){
+      var idx = +spans[k].dataset.o;
+      s.spanRefs[idx] = spans[k];
+      s.charTops[idx] = spans[k].offsetTop;
+    }
+    // maxScroll: bring last char to top of screen
+    s.maxScroll = s.charTops[text.length-1] || 0;
+    if(s.mode==='voice') startVoice();
+  }, 250);
+
+  progFill.style.width = '0%';
+  showCtls();
+  startLoop();
+});
+
+// ── Animation loop ────────────────────────────────────────────────────────────
+function startLoop(){
+  if(s.raf) cancelAnimationFrame(s.raf);
+  s.raf = requestAnimationFrame(loop);
+}
+
+function loop(){
+  if(s.mode==='auto'){
+    if(s.playing){
+      s.scrollY += SPEED_PX[s.speed-1];
+      if(s.scrollY >= s.maxScroll){
+        s.scrollY = s.maxScroll;
+        s.playing = false;
+        updatePPBtn();
+      }
+    }
+  } else {
+    // Voice mode: ease toward targetY
+    var diff = s.targetY - s.scrollY;
+    if(Math.abs(diff) > 0.5) s.scrollY += diff * 0.1;
+    if(s.scrollY > s.maxScroll) s.scrollY = s.maxScroll;
+  }
+
+  track.style.transform = 'translateY(-' + s.scrollY.toFixed(1) + 'px)';
+  var pct = s.maxScroll>0 ? Math.min(100, s.scrollY/s.maxScroll*100) : 0;
+  progFill.style.width = pct + '%';
+
+  s.raf = requestAnimationFrame(loop);
+}
+
+function togglePlay(){
+  s.playing = !s.playing;
+  updatePPBtn();
+}
+
+function updatePPBtn(){
+  if(s.mode==='auto') btnPP.textContent = s.playing ? '⏸' : '▶';
+  else btnPP.textContent = '↺';  // in voice mode the big button = restart
+}
+
+function doRestart(){
+  s.scrollY = s.targetY = 0;
+  s.playing = false;
+  s.cleanPos = s.hlPos = 0;
+  var rds = ptext.querySelectorAll('.rd');
+  for(var i=0; i<rds.length; i++) rds[i].classList.remove('rd');
+  track.style.transform = 'translateY(0)';
+  progFill.style.width = '0%';
+  updatePPBtn();
+  showToast('从头开始');
+}
+
+function goBack(){
+  cancelAnimationFrame(s.raf); s.raf = null;
+  s.playing = false;
+  stopVoice();
+  prompterEl.style.display = 'none';
+  setupEl.style.display = 'flex';
+}
+
+function changeSpeed(d){
+  s.speed = Math.max(1, Math.min(9, s.speed+d));
+  slSpeed.value = s.speed;
+  showToast(SPEED_LBL[s.speed-1]);
+}
+
+// ── Voice tracking ────────────────────────────────────────────────────────────
+function startVoice(){
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SR){
+    vstatus.textContent = '不支持语音识别';
+    showToast('此设备/环境不支持语音识别（需 HTTPS）');
+    return;
+  }
+
+  s.recog = new SR();
+  s.recog.lang = 'zh-CN';
+  s.recog.continuous = true;
+  s.recog.interimResults = true;  // get real-time partial results
+  s.recog.maxAlternatives = 1;
+
+  s.recog.onstart = function(){
+    micDot.classList.add('on');
+    vstatus.textContent = '正在聆听…';
+  };
+
+  s.recog.onresult = function(e){
+    var last = e.results[e.results.length - 1];
+    var transcript = last[0].transcript;
+    var isFinal = last.isFinal;
+    matchAndAdvance(transcript, isFinal);
+  };
+
+  s.recog.onspeechstart = function(){
+    vstatus.textContent = '检测到语音';
+  };
+
+  s.recog.onspeechend = function(){
+    vstatus.textContent = '等待语音…';
+  };
+
+  s.recog.onend = function(){
+    micDot.classList.remove('on');
+    vstatus.textContent = '重连中…';
+    // Auto-restart so tracking stays continuous
+    if(prompterEl.style.display !== 'none' && s.mode === 'voice'){
+      setTimeout(function(){
+        if(s.recog) try{ s.recog.start(); }catch(ex){}
+      }, 700);
+    }
+  };
+
+  s.recog.onerror = function(e){
+    micDot.classList.remove('on');
+    if(e.error === 'not-allowed'){
+      showToast('请允许麦克风权限');
+      vstatus.textContent = '麦克风权限被拒绝';
+    } else if(e.error === 'network'){
+      vstatus.textContent = '网络错误';
+    }
+    // 'no-speech' is normal during pauses, ignore it
+  };
+
+  try{ s.recog.start(); }catch(ex){ showToast('语音启动失败: '+ex.message); }
+}
+
+function stopVoice(){
+  if(s.recog){ s.recog.abort(); s.recog = null; }
+  micDot.classList.remove('on');
+}
+
+// Core: find transcript in remaining script, advance scroll target
+function matchAndAdvance(transcript, isFinal){
+  // Strip non-CJK / non-alphanumeric from recognized text
+  var clean = transcript.replace(/[^一-鿿＀-￯\w]/g, '');
+  if(clean.length < 2) return;
+
+  // Search window: start a few chars before current position (allows slight re-recognition)
+  var wStart = Math.max(0, s.cleanPos - 3);
+  var wEnd   = Math.min(s.clean.length, s.cleanPos + clean.length + 60);
+
+  var bestEnd  = s.cleanPos;  // furthest matched clean-index
+  var bestOrigStart = -1;
+
+  for(var i = wStart; i < wEnd; i++){
+    var len = 0;
+    while(len < clean.length &&
+          i + len < s.clean.length &&
+          s.clean[i + len] === clean[len]) len++;
+
+    // Require minimum 2-char match (or 1 if transcript is only 1 char)
+    var minLen = Math.min(2, clean.length);
+    if(len >= minLen && i + len > bestEnd){
+      bestEnd = i + len;
+      bestOrigStart = s.c2o[i] || 0;
+    }
+  }
+
+  if(bestEnd <= s.cleanPos) return;  // no advancement
+
+  s.cleanPos = bestEnd;
+  var origEnd = s.c2o[Math.min(bestEnd, s.c2o.length - 1)] || 0;
+
+  // Dim all newly-read characters
+  for(var j = s.hlPos; j < origEnd && j < s.orig.length; j++){
+    if(s.spanRefs[j]) s.spanRefs[j].classList.add('rd');
+  }
+  s.hlPos = origEnd;
+
+  // Set scroll target so the next unread character appears at top
+  var nextCharTop = s.charTops[origEnd] || 0;
+  s.targetY = Math.max(0, nextCharTop - 40);  // 40px breathing room
+}
+
+// Toggle mic (pause/resume voice tracking)
+micDot.addEventListener('click', function(e){
+  e.stopPropagation();
+  if(s.recog){
+    stopVoice();
+    vstatus.textContent = '已暂停';
+    showToast('语音暂停');
+  } else {
+    startVoice();
+    showToast('语音恢复');
+  }
+});
+
+// ── Controls visibility ───────────────────────────────────────────────────────
+function showCtls(){
+  clearTimeout(s.ctlsTimer);
+  ctls.classList.remove('hide');
+  s.ctlsTimer = setTimeout(function(){ ctls.classList.add('hide'); }, 3500);
+}
+
+// ── Button events ─────────────────────────────────────────────────────────────
+btnPP.addEventListener('click', function(e){
+  e.stopPropagation();
+  if(s.mode==='auto') togglePlay();
+  else doRestart();
+});
+btnBack.addEventListener('click',    function(e){ e.stopPropagation(); goBack(); });
+btnRestart.addEventListener('click', function(e){ e.stopPropagation(); doRestart(); });
+btnSlower.addEventListener('click',  function(e){ e.stopPropagation(); changeSpeed(-1); });
+btnFaster.addEventListener('click',  function(e){ e.stopPropagation(); changeSpeed(1); });
+
+// Tap prompter: single tap = show controls, double tap = play/pause or restart
+prompterEl.addEventListener('touchend', function(e){
+  if(e.target.closest('#ctls') || e.target.closest('#mic-dot')) return;
+  var now = Date.now();
+  if(now - s.lastTapMs < 280){
+    if(s.mode==='auto') togglePlay();
+    else doRestart();
+  } else {
+    showCtls();
+  }
+  s.lastTapMs = now;
+}, {passive:true});
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+var toastTimer = null;
+function showToast(msg){
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ toastEl.classList.remove('show'); }, 1800);
+}
+
+})();
+</script>
+</body>
+</html>
