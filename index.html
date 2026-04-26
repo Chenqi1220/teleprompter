@@ -383,7 +383,7 @@ function loop(){
   } else {
     // Voice mode: ease toward targetY
     var diff = s.targetY - s.scrollY;
-    if(Math.abs(diff) > 0.5) s.scrollY += diff * 0.1;
+    if(Math.abs(diff) > 0.5) s.scrollY += diff * 0.22;
     if(s.scrollY > s.maxScroll) s.scrollY = s.maxScroll;
   }
 
@@ -533,9 +533,13 @@ function matchAndAdvance(transcript, isFinal){
   }
   s.hlPos = origEnd;
 
-  // Set scroll target so the next unread character appears at top
-  var nextCharTop = s.charTops[origEnd] || 0;
-  s.targetY = Math.max(0, nextCharTop - 40);  // 40px breathing room
+  // Set scroll target: look ahead ~12 chars to compensate for recognition lag
+  // so the screen shows what you're ABOUT to say, not what you just said
+  var lookAhead = isFinal ? 12 : 6;
+  var aheadClean = Math.min(s.cleanPos + lookAhead, s.c2o.length - 1);
+  var aheadOrig  = s.c2o[aheadClean] || origEnd;
+  var nextCharTop = s.charTops[aheadOrig] || 0;
+  s.targetY = Math.max(0, nextCharTop - 40);
 }
 
 // Toggle mic (pause/resume voice tracking)
